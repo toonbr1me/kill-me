@@ -1,118 +1,183 @@
-import asyncio
 import sqlite3
+import os
+import time
+import requests
+import threading
+import schedule
+import json
 from aiogram import Bot, Dispatcher, types
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
-db = sqlite3.connect("mydatabase.db")
+# Создаем подключение к базе данных
+conn = sqlite3.connect('mydatabase.db')
+cursor = conn.cursor()
 
-token_bot = "6741685282:AAFdWgJ_I9T6IhWDnG828y-MYnbhKdKiaOQ"
-admin_id = ""
+admin_id = "1315903018"
+bot_token = "6741685282:AAFdWgJ_I9T6IhWDnG828y-MYnbhKdKiaOQ"
 
-bot = Bot(token=token_bot)
-dp = Dispatcher(bot)
+# Создаем экземпляры бота и диспетчера
+bot = Bot(token=bot_token)
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 
+def update_database():
+    os.system("python upd.py")
+ 
 # Обработчик команды /start
-@dp.message_handler(commands=["start"])
-async def start(message: types.Message):
-    await message.answer("Выберите действие:", reply_markup=types.ReplyKeyboardMarkup(
-        resize_keyboard=True,
-        one_time_keyboard=True,
-        keyboard=[
-            [types.KeyboardButton("Показать")],
-            [types.KeyboardButton("Погода")],
-        ]
-    ))
+@dp.message_handler(commands=['start'])
+async def start_command(message: types.Message):
+    await message.answer('Привет, это обновленная версия бота. Зови его V2. Тут добалены новые возможности. Добавлено запоминание твоей группы и инста-просмотр')
+    await message.answer('Чтобы знать о обновлениях, подпишись на канал https://t.me/t1brime', disable_web_page_preview=True)
+    await message.answer('Также, ты можешь связаться со мной, используя данную ссылку: https://t.me/requiemzxc_komaru', disable_web_page_preview=True)
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(types.KeyboardButton('Показать'), types.KeyboardButton('Погода'))
+    await message.answer('Выберите действие:', reply_markup=keyboard)
+
+# Создаем таблицу пользователей, если она еще не существует
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    course TEXT,
+    group_number TEXT
+)
+""")
 
 # Обработчик кнопки "Показать"
-@dp.message_handler(text="Показать")
-async def show_schedule(message: types.Message):
-    await message.answer("Выберите курс:", reply_markup=types.InlineKeyboardMarkup(
-        row_width=2,
-        inline_keyboard=[
-            [types.InlineKeyboardButton("1 курс", callback_data="1_course")],
-            [types.InlineKeyboardButton("2 курс", callback_data="2_course")],
-        ]
-    ))
+@dp.message_handler(lambda message: message.text == 'Показать')
+async def show_handler(message: types.Message):
+    user_id = message.from_user.id
+    cursor.execute("SELECT course, group_number FROM users WHERE user_id=?", (user_id,))
+    user_info = cursor.fetchone()
+    # Получаем информацию о курсе и группе пользователя из базы данных
+    if user_info is None:
+        # Если информация о пользователе еще не сохранена в базе данных, показываем ему меню выбора курса
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(types.InlineKeyboardButton('1 курс', callback_data='course_1'),
+                     types.InlineKeyboardButton('2 курс', callback_data='course_2'),)
+        keyboard.add(types.InlineKeyboardButton('3 курс', callback_data='course_3'),
+                     types.InlineKeyboardButton('4 курс', callback_data='course_4'),)
+        await message.answer('Выберите курс:', reply_markup=keyboard)
+    else:
+        # Если информация о пользователе уже сохранена в базе данных, показываем ему меню с кнопками "Посмотреть расписание" и "Изменить группу"
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(types.InlineKeyboardButton('Посмотреть расписание', callback_data='show_schedule'))
+        keyboard.add(types.InlineKeyboardButton('Изменить группу', callback_data='change_group'),)
+        await message.answer('Выберите действие:', reply_markup=keyboard)
 
-# Обработчик инлайн кнопки "1 курс"
-@dp.callback_query_handler(text="1_course")
-async def show_group_101(call: types.CallbackQuery):
-    await call.answer()
-    await call.message.edit_text("Выберите группу:", reply_markup=types.InlineKeyboardMarkup(
-        inline_keyboard=[[types.InlineKeyboardButton("101", callback_data="group_101")]]
-    ))
+# Обработчик выбора действия
+@dp.callback_query_handler(lambda c: c.data in ['show_schedule', 'change_group'])
+async def action_handler(callback_query: types.CallbackQuery):
+    action = callback_query.data
+    user_id = callback_query.from_user.id
+    if action == 'show_schedule':
+        # Если пользователь выбрал "Посмотреть расписание", показываем ему расписание его группы
+        cursor.execute("SELECT group_number FROM users WHERE user_id=?", (user_id,))
+        group = cursor.fetchone()[0]
+        cursor.execute(f"SELECT date FROM schedule_{group}")
+        dates = cursor.fetchall()
+        keyboard = types.InlineKeyboardMarkup()
+        for date in dates:
+            keyboard.add(types.InlineKeyboardButton(date[0], callback_data=f"{group}_{date[0]}"))
+        await callback_query.message.answer('Выберите дату:', reply_markup=keyboard)
+    else:
+        # Если пользователь выбрал "Изменить группу", показываем ему меню выбора курса
+        keyboard = types.InlineKeyboardMarkup()
+        keyboard.add(types.InlineKeyboardButton('1 курс', callback_data='course_1'),
+                     types.InlineKeyboardButton('2 курс', callback_data='course_2'),)
+        keyboard.add(types.InlineKeyboardButton('3 курс', callback_data='course_3'),
+                     types.InlineKeyboardButton('4 курс', callback_data='course_4'),)
+        await callback_query.message.answer('Выберите курс:', reply_markup=keyboard)
+        
+# Обработчик кнопки "Погода"
+@dp.message_handler(lambda message: message.text == 'Погода')
+async def weather_handler(message: types.Message):
+    api_key = " fdb88f8f513a4d7cad075312242401" # weatherapi api токен
+    location = "Chelyabinsk"
+    response = requests.get(f"http://api.weatherapi.com/v1/current.json?key={api_key}&q={location}&lang=ru")
+    data = json.loads(response.text)
+    current_temp = data["current"]["temp_c"]
+    current_condition = data["current"]["condition"]["text"]
+    current_wind = data["current"]["wind_kph"]
+    await message.answer(f"Сейчас в Челябинске {current_temp}°C, {current_condition}, ветер {current_wind} км/ч")
 
-# Обработчик инлайн кнопки "2 курс"
-@dp.callback_query_handler(text="2_course")
-async def show_groups_210_218(call: types.CallbackQuery):
-    await call.answer()
-    await call.message.edit_text("Выберите группу:", reply_markup=types.InlineKeyboardMarkup(
-        inline_keyboard=[
-            [types.InlineKeyboardButton("210", callback_data="group_210")],
-            [types.InlineKeyboardButton("218", callback_data="group_218")],
-        ]
-    ))
+# Обработчик выбора курса
+@dp.callback_query_handler(lambda c: c.data in ['course_1', 'course_2', 'course_3', 'course_4'])
+async def course_handler(callback_query: types.CallbackQuery):
+    course = callback_query.data
+    if course == 'course_1':
+        groups = ['100', '101', '102', '104', '105', '108', '110', '112']
+    elif course == 'course_2':
+        groups = ['Ф-202', 'Ю-208', 'СД/оз-202А', 'Ф-202', 'П-210', 'П-211', 'Д-212', 'СД-222']
+    elif course == 'course_3':
+        groups = ['Ф-302', 'Ю-308', 'ОЛ-320', 'П-310', 'Д-312', 'СД-322', 'ПД-318', 'ПД-319', 'Ф-302']
+    else:
+        groups = ['ОЛ-220', 'П-410', 'СД-422', 'Ф-402']
+    keyboard = types.InlineKeyboardMarkup()
+    for group in groups:
+        keyboard.add(types.InlineKeyboardButton(group, callback_data=group))
+    await callback_query.message.answer('Выберите группу:', reply_markup=keyboard)
 
-# Обработчик инлайн кнопки "Номер группы"
-@dp.callback_query_handler(lambda call: call.data.startswith("group_"))
-async def show_dates(call: types.CallbackQuery):
-    group_id = int(call.data.split("_")[1])
-    dates = get_dates_for_group(group_id)
-    await call.answer()
-    await call.message.edit_text("Выберите дату:", reply_markup=types.InlineKeyboardMarkup(
-        inline_keyboard=[[types.InlineKeyboardButton(date, callback_data=f"date_{date}") for date in dates]]
-    ))
+# Обработчик выбора группы
+@dp.callback_query_handler(lambda c: c.data not in ['course_1', 'course_2', 'course_3', 'course_4', 'show_schedule', 'change_group'])
+async def group_handler(callback_query: types.CallbackQuery):
+    group = callback_query.data.replace("-", "_").replace("/", "_")
+    user_id = callback_query.from_user.id
+    course = group[0]  # Первый символ номера группы - это номер курса
+    # Обновляем информацию о курсе и группе пользователя в базе данных
+    cursor.execute("INSERT OR REPLACE INTO users (user_id, course, group_number) VALUES (?, ?, ?)", 
+                   (user_id, course, group))
+    conn.commit()
+    cursor.execute(f"SELECT date FROM schedule_{group}")
+    dates = cursor.fetchall()
+    keyboard = types.InlineKeyboardMarkup()
+    for date in dates:
+        keyboard.add(types.InlineKeyboardButton(date[0], callback_data=f"{group}_{date[0]}"))
+    await callback_query.message.answer('Выберите дату:', reply_markup=keyboard)
 
-# Обработчик инлайн кнопки "Дата"
-@dp.callback_query_handler(lambda call: call.data.startswith("date_"))
-async def show_schedule(call: types.CallbackQuery):
-   date = call.data.split("_")[1]
-   group_id = int(call.data.split("_")[2])
-   schedule = get_schedule_for_date(group_id, date)
-   await call.answer()
-   await call.message.edit_text(f"Расписание на {date}:\n\n{schedule}")
+# Обработчик выбора даты
+@dp.callback_query_handler(lambda c: c.data and "_" in c.data)
+async def date_handler(callback_query: types.CallbackQuery):
+    group, date = callback_query.data.split("_")
+    cursor.execute(f"SELECT schedule_raw FROM schedule_{group} WHERE date=?", (date,))
+    schedule = cursor.fetchone()
+    await callback_query.message.answer(f'Расписание на {schedule[0]}')
 
-def get_dates_for_group(group_id):
-    cursor = db.cursor()
-    cursor.execute(f"SELECT date FROM schedule_{group_id}")
-    dates = [date[0] for date in cursor.fetchall()]
-    cursor.close()
-    return dates
+# Обработчик команды /broadcast
+@dp.message_handler(commands=['broadcast'], user_id=admin_id)
+async def broadcast_command(message: types.Message):
+    # Создаем клавиатуру с кнопкой отмены
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton('Отмена', callback_data='cancel_broadcast'))
+    # Запрашиваем у администратора сообщение или вложение для рассылки
+    await message.answer('Напишите или отправьте вложение:', reply_markup=keyboard)
 
-def get_schedule_for_date(group_id, date):
-   cursor = db.cursor()
-   cursor.execute(f"SELECT schedule_raw FROM schedule_{group_id} WHERE date = ?", (date,))
-   schedule_raw = cursor.fetchone()[0]
-   cursor.close()
+# Обработчик кнопки "Отмена"
+@dp.callback_query_handler(lambda c: c.data == 'cancel_broadcast', user_id=admin_id)
+async def cancel_broadcast(callback_query: types.CallbackQuery):
+    await callback_query.message.answer('Рассылка отменена')
 
-   # Разбиваем строку schedule_raw на строки по разделителю "\n"
-   schedule_lines = schedule_raw.split("\n")
+# Обработчик текстовых сообщений от администратора после команды /broadcast
+@dp.message_handler(user_id=admin_id)
+async def broadcast_message(message: types.Message):
+    # Получаем список всех пользователей
+    cursor.execute("SELECT user_id FROM users")
+    users = cursor.fetchall()
+    # Отправляем сообщение всем пользователям
+    for user in users:
+        try:
+            await bot.send_message(user[0], message.text, disable_notification=True)
+        except Exception as e:
+            print(f"Failed to send message to {user[0]}: {e}")
+    await message.answer('Рассылка выполнена')
 
-   # Обрабатываем каждую строку
-   schedule = []
-   for line in schedule_lines:
-       if line.startswith("П") or line.startswith("Ч"):
-           # Это день недели и дата
-           schedule.append(line)
-       elif not line:
-           # Пустая строка - разделитель между парами
-           schedule.append("")
-       else:
-           # Это информация о паре
-           parts = line.split(" ")
-           time = parts[0]
-           subject = parts[1]
-           teacher = parts[2]
-           room = parts[3]
+def run_schedule():
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+        
+schedule_thread = threading.Thread(target=run_schedule)
+schedule_thread.start()
 
-           # Формируем строку с информацией о паре
-           schedule_item = f"{time}\n{subject}\n{teacher}\n{room}"
-           schedule.append(schedule_item)
-
-   # Возвращаем список с расписанием
-   return "\n".join(schedule)
-
-async def main():
-    await dp.start_polling()
-    
-if __name__ == "__main__":
-    asyncio.run(main())
+if __name__ == '__main__':
+    from aiogram import executor
+    executor.start_polling(dp)
