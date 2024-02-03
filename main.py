@@ -65,11 +65,11 @@ async def show_dates(call: types.CallbackQuery):
 # Обработчик инлайн кнопки "Дата"
 @dp.callback_query_handler(lambda call: call.data.startswith("date_"))
 async def show_schedule(call: types.CallbackQuery):
-    date = call.data.split("_")[1]
-    group_id = int(call.data.split("_")[2])
-    schedule = get_schedule_for_date(group_id, date)
-    await call.answer()
-    await call.message.edit_text(f"Расписание на {date}:\n{schedule}")
+   date = call.data.split("_")[1]
+   group_id = int(call.data.split("_")[2])
+   schedule = get_schedule_for_date(group_id, date)
+   await call.answer()
+   await call.message.edit_text(f"Расписание на {date}:\n\n{schedule}")
 
 def get_dates_for_group(group_id):
     cursor = db.cursor()
@@ -79,11 +79,37 @@ def get_dates_for_group(group_id):
     return dates
 
 def get_schedule_for_date(group_id, date):
-    cursor = db.cursor()
-    cursor.execute(f"SELECT schedule_raw FROM schedule_{group_id} WHERE date = ?", (date,))
-    schedule = cursor.fetchone()[0]
-    cursor.close()
-    return schedule
+   cursor = db.cursor()
+   cursor.execute(f"SELECT schedule_raw FROM schedule_{group_id} WHERE date = ?", (date,))
+   schedule_raw = cursor.fetchone()[0]
+   cursor.close()
+
+   # Разбиваем строку schedule_raw на строки по разделителю "\n"
+   schedule_lines = schedule_raw.split("\n")
+
+   # Обрабатываем каждую строку
+   schedule = []
+   for line in schedule_lines:
+       if line.startswith("П") or line.startswith("Ч"):
+           # Это день недели и дата
+           schedule.append(line)
+       elif not line:
+           # Пустая строка - разделитель между парами
+           schedule.append("")
+       else:
+           # Это информация о паре
+           parts = line.split(" ")
+           time = parts[0]
+           subject = parts[1]
+           teacher = parts[2]
+           room = parts[3]
+
+           # Формируем строку с информацией о паре
+           schedule_item = f"{time}\n{subject}\n{teacher}\n{room}"
+           schedule.append(schedule_item)
+
+   # Возвращаем список с расписанием
+   return "\n".join(schedule)
 
 async def main():
     await dp.start_polling()
