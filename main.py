@@ -7,6 +7,8 @@ import schedule
 import json
 from aiogram import Bot, Dispatcher, types
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+
 
 # Создаем подключение к базе данных
 conn = sqlite3.connect('mydatabase.db')
@@ -77,7 +79,7 @@ async def action_handler(callback_query: types.CallbackQuery):
         dates = cursor.fetchall()
         keyboard = types.InlineKeyboardMarkup()
         for date in dates:
-            keyboard.add(types.InlineKeyboardButton(date[0], callback_data=f"{group}_{date[0]}"))
+            keyboard.add(types.InlineKeyboardButton(date[0], callback_data=f"{group}__{date[0]}"))
         await callback_query.message.answer('Выберите дату:', reply_markup=keyboard)
     else:
         # Если пользователь выбрал "Изменить группу", показываем ему меню выбора курса
@@ -123,25 +125,49 @@ async def group_handler(callback_query: types.CallbackQuery):
     group = callback_query.data.replace("-", "_").replace("/", "_")
     user_id = callback_query.from_user.id
     course = group[0]  # Первый символ номера группы - это номер курса
-    # Обновляем информацию о курсе и группе пользователя в базе данных
-    cursor.execute("INSERT OR REPLACE INTO users (user_id, course, group_number) VALUES (?, ?, ?)", 
-                   (user_id, course, group))
+
+    # Проверяем, существует ли пользователь в базе данных
+    cursor.execute("SELECT user_id FROM users WHERE user_id=?", (user_id,))
+    user_exists = cursor.fetchone()
+
+    if user_exists is None:
+        # Если пользователя нет в базе данных, вставляем новую запись
+        cursor.execute("INSERT INTO users (user_id, course, group_number) VALUES (?, ?, ?)", 
+                       (user_id, course, group))
+    else:
+        # Если пользователь уже существует, обновляем его запись
+        cursor.execute("UPDATE users SET course = ?, group_number = ? WHERE user_id = ?", 
+                       (course, group, user_id))
+
     conn.commit()
-    cursor.execute(f"SELECT date FROM schedule_{group}")
-    dates = cursor.fetchall()
-    keyboard = types.InlineKeyboardMarkup()
-    for date in dates:
-        keyboard.add(types.InlineKeyboardButton(date[0], callback_data=f"{group}_{date[0]}"))
-    await callback_query.message.answer('Выберите дату:', reply_markup=keyboard)
 
+    # Define the keyboard here
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+    keyboard.add(KeyboardButton('Группа выбрана'))
+
+    await callback_query.message.answer('Группа выбрана:', reply_markup=keyboard)
+    
 # Обработчик выбора даты
-@dp.callback_query_handler(lambda c: c.data and "_" in c.data)
+@dp.callback_query_handler(lambda c: c.data and "__" in c.data)
 async def date_handler(callback_query: types.CallbackQuery):
-    group, date = callback_query.data.split("_")
-    cursor.execute(f"SELECT schedule_raw FROM schedule_{group} WHERE date=?", (date,))
-    schedule = cursor.fetchone()
-    await callback_query.message.answer(f'Расписание на {schedule[0]}')
+    # Получаем user_id из callback_query
+    user_id = callback_query.from_user.id
 
+    # Получаем номер группы из базы данных
+    cursor.execute("SELECT group_number FROM users WHERE user_id=?", (user_id,))
+    group = cursor.fetchone()[0]
+
+    # Получаем дату из callback_query
+    _, date = callback_query.data.split("__")
+
+    # Затем получаем расписание на эту дату
+    cursor.execute(f"SELECT schedule FROM schedule_{group} WHERE date=?", (date,))
+    schedule = cursor.fetchone()
+    if schedule is not None:
+        await callback_query.message.answer(f'Расписание на {date}: {schedule[0]}')
+    else:
+        await callback_query.message.answer('No schedule found for this date.')
+        
 # Обработчик команды /broadcast
 @dp.message_handler(commands=['broadcast'], user_id=admin_id)
 async def broadcast_command(message: types.Message):
