@@ -30,9 +30,40 @@ groups = {
 }
 
 date_ids = {}
+broadcast_message_id = None
 
 bot = Bot(token='6741685282:AAFdWgJ_I9T6IhWDnG828y-MYnbhKdKiaOQ')
 dp = Dispatcher(bot)
+
+ADMIN_ID = 1315903018
+
+# Обработчик команды /broadcast
+@dp.message_handler(commands=['broadcast'], user_id=ADMIN_ID)
+async def broadcast_command(message: types.Message):
+    # Создаем клавиатуру с кнопкой отмены
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.add(types.InlineKeyboardButton('Отмена', callback_data='cancel_broadcast'))
+    # Запрашиваем у администратора сообщение или вложение для рассылки
+    await message.answer('Напишите или отправьте вложение:', reply_markup=keyboard)
+
+@dp.message_handler(user_id=ADMIN_ID)
+async def broadcast_message(message: types.Message):
+    # Получаем список всех пользователей
+    cursor.execute("SELECT user_id FROM user_group")
+    users = cursor.fetchall()
+    # Отправляем сообщение всем пользователям
+    for user in users:
+        try:
+            await bot.send_message(user[0], message.text, disable_notification=True)
+        except Exception as e:
+            print(f"Failed to send message to {user[0]}: {e}")
+    await message.answer('Рассылка выполнена')
+
+@dp.callback_query_handler(lambda c: c.data == 'cancel_broadcast')
+async def process_cancel_broadcast(callback_query: types.CallbackQuery):
+    global broadcast_message_id
+    broadcast_message_id = None
+    await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Рассылка отменена.')
 
 @dp.message_handler(commands=['start'])
 async def process_start_command(message: types.Message):
