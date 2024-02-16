@@ -6,6 +6,8 @@ import threading
 import schedule
 import json
 import aiogram
+import aiohttp
+import asyncio
 from aiogram import Bot, types
 from aiogram.dispatcher import Dispatcher
 from aiogram.utils import executor
@@ -35,6 +37,7 @@ broadcast_message_id = None
 bot = Bot(token='6741685282:AAFdWgJ_I9T6IhWDnG828y-MYnbhKdKiaOQ')
 dp = Dispatcher(bot)
 
+api_key = "yTu61ryW1izHrP2RYgSkvCkgmFODwbUykkcEdXab9fRhrtX5x0mAhE2zpPMj"
 ADMIN_ID = 1315903018
 
 @dp.message_handler(commands=['start'])
@@ -74,8 +77,8 @@ async def process_display_choice(message: types.Message):
     else:
         button1 = types.InlineKeyboardButton(text='Изменить группу', callback_data='change_group')
         button2 = types.InlineKeyboardButton(text='Посмотреть расписание', callback_data='view_schedule')
-        keyboard.add(button1)
         keyboard.add(button2)
+        keyboard.add(button1)
     await message.answer('Выберите действие:', reply_markup=keyboard)
     
 @dp.callback_query_handler(lambda c: c.data in ['1', '2', '3', '4'])
@@ -96,16 +99,16 @@ async def process_group_choice(callback_query: types.CallbackQuery):
     keyboard = types.InlineKeyboardMarkup()
     button1 = types.InlineKeyboardButton(text='Изменить группу', callback_data='change_group')
     button2 = types.InlineKeyboardButton(text='Посмотреть расписание', callback_data='view_schedule')
-    keyboard.add(button1)
     keyboard.add(button2)
+    keyboard.add(button1)
     await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Выберите действие:', reply_markup=keyboard)
 
 @dp.callback_query_handler(lambda c: c.data == 'change_group')
 async def process_change_group(callback_query: types.CallbackQuery):
     keyboard = types.InlineKeyboardMarkup()
-    buttons = [types.InlineKeyboardButton(text='Да', callback_data='confirm_change'),
-               types.InlineKeyboardButton(text='Нет', callback_data='cancel_change')]
-    keyboard.add(*buttons)
+    buttons = types.InlineKeyboardButton(text='Да', callback_data='confirm_change')
+    buttons1 = types.InlineKeyboardButton(text='Нет', callback_data='cancel_change')
+    keyboard.add(buttons, buttons1)
     await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Вы уверены?', reply_markup=keyboard)
 
 @dp.callback_query_handler(lambda c: c.data == 'confirm_change')
@@ -127,9 +130,10 @@ async def process_confirm_change(callback_query: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == 'cancel_change')
 async def process_cancel_change(callback_query: types.CallbackQuery):
     keyboard = types.InlineKeyboardMarkup()
-    buttons = [types.InlineKeyboardButton(text='Изменить группу', callback_data='change_group'),
-               types.InlineKeyboardButton(text='Посмотреть расписание', callback_data='process_group_choice')]
-    keyboard.add(*buttons)
+    button1 = types.InlineKeyboardButton(text='Изменить группу', callback_data='change_group')
+    button2 = types.InlineKeyboardButton(text='Посмотреть расписание', callback_data='view_schedule')
+    keyboard.add(button2)
+    keyboard.add(button1)
     await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Выберите действие:', reply_markup=keyboard)
 
 def get_dates(group):
@@ -161,7 +165,7 @@ async def process_date_choice(callback_query: types.CallbackQuery):
     cursor.execute("SELECT group_name FROM user_group WHERE user_id = ?", (user_id,))
     group = cursor.fetchone()[0]
     schedule = get_schedule(group, date)
-    support_message = "\nПоддержи мой проект:\nhttps://www.donationalerts.com/r/t1brime"
+    support_message = "\nПоддержи мой проект:\nhttps://new.donatepay.ru/@t1brimedev"
     await bot.send_message(chat_id=callback_query.from_user.id, text=schedule + support_message, disable_web_page_preview=True)
 
 @dp.message_handler(commands=['broadcast'], user_id=ADMIN_ID)
@@ -191,15 +195,57 @@ async def process_cancel_broadcast(callback_query: types.CallbackQuery):
     broadcast_message_id = None
     await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Рассылка отменена.')
 
+displayed_donations = set()
+
+async def check_donations():
+    global displayed_donations
+    url = "https://donatepay.ru/api/v1/notifications"
+    params = {
+        "access_token": api_key,
+        "limit": 5,
+        "order": "DESC",
+        "type": "donation",
+        "view": "0"
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, params=params) as resp:
+            data = await resp.json()
+            new_donations = [n for n in data['data'] if n['id'] not in displayed_donations]
+            for notification in sorted(new_donations, key=lambda n: n['id']):
+                name = notification['vars']['name']
+                comment = notification['vars']['comment']
+                sum_donation = notification['vars']['sum']
+                currency = notification['vars']['currency']
+                message_text = f"Новый донат от: {name}, он задонил {sum_donation} {currency} на жизнь бота. Также он оставил коммент: {comment}"
+                print(message_text)
+                displayed_donations.add(notification['id'])
+                # отправляем сообщение всем пользователям в списке
+                cursor.execute("SELECT user_id FROM user_group")
+                users = cursor.fetchall()
+                # Отправляем сообщение всем пользователям
+                for user in users:
+                    try:
+                        await bot.send_message(user[0], message_text, disable_notification=True)
+                    except Exception as e:
+                        print(f"Failed to send message to {user[0]}: {e}")
+
+async def schedule_check_donations(dp):
+    while True:
+        await check_donations()
+        await asyncio.sleep(20)  # wait for 10 seconds
+
+async def on_startup(dp):
+    asyncio.create_task(schedule_check_donations(dp))
+    
 def run_schedule():
     while True:
         schedule.run_pending()
         time.sleep(1)
 
-schedule.every(6).hours.do(run_upd_script)
+schedule.every().monday.do(run_upd_script)
 
 t = threading.Thread(target=run_schedule)
 t.start()
 
 if __name__ == '__main__':
-    executor.start_polling(dp)
+    executor.start_polling(dp, on_startup=on_startup)
