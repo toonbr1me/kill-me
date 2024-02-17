@@ -11,7 +11,6 @@ import asyncio
 from aiogram import Bot, types
 from aiogram.dispatcher import Dispatcher
 from aiogram.utils import executor
-from donationalerts.asyncio_api import Alert
 
 # Создание базы данных и таблицы, если они не существуют
 conn = sqlite3.connect('mydatabase.db')
@@ -20,10 +19,9 @@ cursor.execute('''CREATE TABLE IF NOT EXISTS user_group
                (user_id INTEGER PRIMARY KEY, group_name TEXT)''')
 conn.commit()
 
-
 def run_upd_script():
     os.system("python upd.py")
-alert = Alert("f4mww7EiPG8NH1rKYhlr")
+
 
 # Словарь групп по курсам
 groups = {
@@ -80,7 +78,6 @@ async def process_display_choice(message: types.Message):
         button1 = types.InlineKeyboardButton(text='Изменить группу', callback_data='change_group')
         button2 = types.InlineKeyboardButton(text='Посмотреть расписание', callback_data='view_schedule')
         keyboard.add(button2)
-        keyboard.add(button2)
         keyboard.add(button1)
     await message.answer('Выберите действие:', reply_markup=keyboard)
     
@@ -103,16 +100,12 @@ async def process_group_choice(callback_query: types.CallbackQuery):
     button1 = types.InlineKeyboardButton(text='Изменить группу', callback_data='change_group')
     button2 = types.InlineKeyboardButton(text='Посмотреть расписание', callback_data='view_schedule')
     keyboard.add(button2)
-    keyboard.add(button2)
     keyboard.add(button1)
     await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Выберите действие:', reply_markup=keyboard)
 
 @dp.callback_query_handler(lambda c: c.data == 'change_group')
 async def process_change_group(callback_query: types.CallbackQuery):
     keyboard = types.InlineKeyboardMarkup()
-    buttons = types.InlineKeyboardButton(text='Да', callback_data='confirm_change')
-    buttons1 = types.InlineKeyboardButton(text='Нет', callback_data='cancel_change')
-    keyboard.add(buttons, buttons1)
     buttons = types.InlineKeyboardButton(text='Да', callback_data='confirm_change')
     buttons1 = types.InlineKeyboardButton(text='Нет', callback_data='cancel_change')
     keyboard.add(buttons, buttons1)
@@ -137,10 +130,6 @@ async def process_confirm_change(callback_query: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == 'cancel_change')
 async def process_cancel_change(callback_query: types.CallbackQuery):
     keyboard = types.InlineKeyboardMarkup()
-    button1 = types.InlineKeyboardButton(text='Изменить группу', callback_data='change_group')
-    button2 = types.InlineKeyboardButton(text='Посмотреть расписание', callback_data='view_schedule')
-    keyboard.add(button2)
-    keyboard.add(button1)
     button1 = types.InlineKeyboardButton(text='Изменить группу', callback_data='change_group')
     button2 = types.InlineKeyboardButton(text='Посмотреть расписание', callback_data='view_schedule')
     keyboard.add(button2)
@@ -179,7 +168,6 @@ async def process_date_choice(callback_query: types.CallbackQuery):
     support_message = "\nПоддержи мой проект:\nhttps://new.donatepay.ru/@t1brimedev"
     await bot.send_message(chat_id=callback_query.from_user.id, text=schedule + support_message, disable_web_page_preview=True)
 
-
 @dp.message_handler(commands=['broadcast'], user_id=ADMIN_ID)
 async def broadcast_command(message: types.Message):
     # Создаем клавиатуру с кнопкой отмены
@@ -196,7 +184,7 @@ async def broadcast_message(message: types.Message):
     # Отправляем сообщение всем пользователям
     for user in users:
         try:
-            await bot.send_message(user[0], message.text)
+            await bot.send_message(user[0], message.text, disable_notification=True)
         except Exception as e:
             print(f"Failed to send message to {user[0]}: {e}")
     await message.answer('Рассылка выполнена')
