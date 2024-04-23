@@ -12,16 +12,19 @@ from aiogram import Bot, types
 from aiogram.dispatcher import Dispatcher
 from aiogram.utils import executor
 
-# Создание базы данных и таблицы, если они не существуют
-conn = sqlite3.connect('mydatabase.db')
+import pymysql
+
+# Создаем подключение к базе данных
+conn = pymysql.connect(host='3di.h.filess.io', 
+                       port=3306, user='mydatabase_daughterdo', 
+                       password='665102ebaf4b5bc5606316929ba1e751dd23955e', 
+                       db='mydatabase_daughterdo')
 cursor = conn.cursor()
-cursor.execute('''CREATE TABLE IF NOT EXISTS user_group
-               (user_id INTEGER PRIMARY KEY, group_name TEXT)''')
-conn.commit()
 
 def run_upd_script():
     os.system("python upd.py")
 
+#pulled
 
 # Словарь групп по курсам
 groups = {
@@ -46,7 +49,7 @@ async def process_start_command(message: types.Message):
     await message.answer('Чтобы знать о обновлениях, подпишись на канал https://t.me/t1brime', disable_web_page_preview=True)
     await message.answer('Также, ты можешь связаться со мной, используя данную ссылку: https://t.me/requiemzxc_komaru', disable_web_page_preview=True)
     user_id = message.from_user.id
-    cursor.execute("SELECT group_name FROM user_group WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT group_name FROM user_group WHERE user_id = %s", (user_id,))
     group_name = cursor.fetchone()
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     buttons = ['Погода']
@@ -68,7 +71,7 @@ async def weather_handler(message: types.Message):
 @dp.message_handler(lambda message: message.text == 'Отобразить')
 async def process_display_choice(message: types.Message):
     user_id = message.from_user.id
-    cursor.execute("SELECT group_name FROM user_group WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT group_name FROM user_group WHERE user_id = %s", (user_id,))
     group_name = cursor.fetchone()
     keyboard = types.InlineKeyboardMarkup()
     if group_name is None:
@@ -94,7 +97,7 @@ async def process_course_choice(callback_query: types.CallbackQuery):
 async def process_group_choice(callback_query: types.CallbackQuery):
     group = callback_query.data.replace('-', '_').replace('/', '_')
     user_id = callback_query.from_user.id
-    cursor.execute("INSERT OR REPLACE INTO user_group (user_id, group_name) VALUES (?, ?)", (user_id, group))
+    cursor.execute("INSERT OR REPLACE INTO user_group (user_id, group_name) VALUES (%s, %s)", (user_id, group))
     conn.commit()
     keyboard = types.InlineKeyboardMarkup()
     button1 = types.InlineKeyboardButton(text='Изменить группу', callback_data='change_group')
@@ -114,7 +117,7 @@ async def process_change_group(callback_query: types.CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == 'confirm_change')
 async def process_confirm_change(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
-    cursor.execute("UPDATE user_group SET group_name = NULL WHERE user_id = ?", (user_id,))
+    cursor.execute("UPDATE user_group SET group_name = NULL WHERE user_id = %s", (user_id,))
     conn.commit()
     keyboard = types.InlineKeyboardMarkup()
     keyboard.row(
@@ -142,14 +145,14 @@ def get_dates(group):
     return [date[0] for date in dates]
 
 def get_schedule(group, date):
-    cursor.execute(f"SELECT schedule_raw FROM schedule_{group} WHERE date = ?", (date,))
+    cursor.execute(f"SELECT data FROM schedule_{group} WHERE date = %s", (date,))
     schedule = cursor.fetchone()
     return schedule[0] if schedule else None
 
 @dp.callback_query_handler(lambda c: c.data == 'view_schedule')
 async def process_view_schedule(callback_query: types.CallbackQuery):
     user_id = callback_query.from_user.id
-    cursor.execute("SELECT group_name FROM user_group WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT group_name FROM user_group WHERE user_id = %s", (user_id,))
     group = cursor.fetchone()[0]
     dates = get_dates(group)
     keyboard = types.InlineKeyboardMarkup()
@@ -162,7 +165,7 @@ async def process_view_schedule(callback_query: types.CallbackQuery):
 async def process_date_choice(callback_query: types.CallbackQuery):
     date = callback_query.data[5:]
     user_id = callback_query.from_user.id
-    cursor.execute("SELECT group_name FROM user_group WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT group_name FROM user_group WHERE user_id = %s", (user_id,))
     group = cursor.fetchone()[0]
     schedule = get_schedule(group, date)
     support_message = "\nПоддержи мой проект:\nhttps://new.donatepay.ru/@t1brimedev"
@@ -197,45 +200,45 @@ async def process_cancel_broadcast(callback_query: types.CallbackQuery):
 
 displayed_donations = set()
 
-async def check_donations():
-    global displayed_donations
-    url = "https://donatepay.ru/api/v1/notifications"
-    params = {
-        "access_token": api_key,
-        "limit": 5,
-        "order": "DESC",
-        "type": "donation",
-        "view": "0"
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, params=params) as resp:
-            data = await resp.json()
-            new_donations = [n for n in data['data'] if n['id'] not in displayed_donations]
-            for notification in sorted(new_donations, key=lambda n: n['id']):
-                name = notification['vars']['name']
-                comment = notification['vars']['comment']
-                sum_donation = notification['vars']['sum']
-                currency = notification['vars']['currency']
-                message_text = f"Новый донат от: {name}, он задонил {sum_donation} {currency} на жизнь бота. Также он оставил коммент: {comment}"
-                print(message_text)
-                displayed_donations.add(notification['id'])
-                # отправляем сообщение всем пользователям в списке
-                cursor.execute("SELECT user_id FROM user_group")
-                users = cursor.fetchall()
-                # Отправляем сообщение всем пользователям
-                for user in users:
-                    try:
-                        await bot.send_message(user[0], message_text, disable_notification=True)
-                    except Exception as e:
-                        print(f"Failed to send message to {user[0]}: {e}")
+# async def check_donations():
+#     global displayed_donations
+#     url = "https://donatepay.ru/api/v1/notifications"
+#     params = {
+#         "access_token": api_key,
+#         "limit": 5,
+#         "order": "DESC",
+#         "type": "donation",
+#         "view": "0"
+#     }
+#     async with aiohttp.ClientSession() as session:
+#         async with session.get(url, params=params) as resp:
+#             data = await resp.json()
+#             new_donations = [n for n in data['data'] if n['id'] not in displayed_donations]
+#             for notification in sorted(new_donations, key=lambda n: n['id']):
+#                 name = notification['vars']['name']
+#                 comment = notification['vars']['comment']
+#                 sum_donation = notification['vars']['sum']
+#                 currency = notification['vars']['currency']
+#                 message_text = f"Новый донат от: {name}, он задонил {sum_donation} {currency} на жизнь бота. Также он оставил коммент: {comment}"
+#                 print(message_text)
+#                 displayed_donations.add(notification['id'])
+#                 # отправляем сообщение всем пользователям в списке
+#                 cursor.execute("SELECT user_id FROM user_group")
+#                 users = cursor.fetchall()
+#                 # Отправляем сообщение всем пользователям
+#                 for user in users:
+#                     try:
+#                         await bot.send_message(user[0], message_text, disable_notification=True)
+#                     except Exception as e:
+#                         print(f"Failed to send message to {user[0]}: {e}")
 
-async def schedule_check_donations(dp):
-    while True:
-        await check_donations()
-        await asyncio.sleep(20)  # wait for 10 seconds
+# async def schedule_check_donations(dp):
+#     while True:
+#         await check_donations()
+#         await asyncio.sleep(20)  # wait for 10 seconds
 
-async def on_startup(dp):
-    asyncio.create_task(schedule_check_donations(dp))
+# async def on_startup(dp):
+#     asyncio.create_task(schedule_check_donations(dp))
     
 def run_schedule():
     while True:
@@ -248,4 +251,5 @@ t = threading.Thread(target=run_schedule)
 t.start()
 
 if __name__ == '__main__':
-    executor.start_polling(dp, on_startup=on_startup)
+    # executor.start_polling(dp, on_startup=on_startup)
+    executor.start_polling(dp)
